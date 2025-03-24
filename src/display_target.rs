@@ -33,8 +33,8 @@ impl embedded_graphics::draw_target::DrawTarget for DisplayBuffer<'_> {
         Ok(())
     }
 }
+
 impl geometry::OriginDimensions for DisplayBuffer<'_> {
-    /// Return the size of the display
     fn size(&self) -> geometry::Size {
         geometry::Size::new(self.width as u32, self.height as u32)
     }
