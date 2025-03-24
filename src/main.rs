@@ -434,10 +434,10 @@ async fn main(_spawner: Spawner) {
 
     // Set the LTDC to 480x272
     LTDC.gcr().modify(|w| {
-        w.set_hspol(embassy_stm32::pac::ltdc::vals::Hspol::ACTIVELOW);
-        w.set_vspol(embassy_stm32::pac::ltdc::vals::Vspol::ACTIVELOW);
-        w.set_depol(embassy_stm32::pac::ltdc::vals::Depol::ACTIVELOW);
-        w.set_pcpol(embassy_stm32::pac::ltdc::vals::Pcpol::RISINGEDGE);
+        w.set_hspol(embassy_stm32::pac::ltdc::vals::Hspol::ACTIVE_LOW);
+        w.set_vspol(embassy_stm32::pac::ltdc::vals::Vspol::ACTIVE_LOW);
+        w.set_depol(embassy_stm32::pac::ltdc::vals::Depol::ACTIVE_LOW);
+        w.set_pcpol(embassy_stm32::pac::ltdc::vals::Pcpol::RISING_EDGE);
     });
 
     // Set Sync signals
