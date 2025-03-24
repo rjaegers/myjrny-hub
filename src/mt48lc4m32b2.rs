@@ -1,3 +1,5 @@
+/// Micron MT48LC4M32B2 SDRAM taken from https://github.com/stm32-rs/stm32-fmc/blob/eff647df44b91eae6ee0197923a29e01f28bd4bd/src/devices/mt48lc4m32b2.rs
+#[allow(unused)]
 pub mod mt48lc4m32b2_6 {
     use stm32_fmc::{SdramChip, SdramConfiguration, SdramTiming};
 

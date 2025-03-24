@@ -2,7 +2,8 @@
 #![no_main]
 
 mod display_target;
-mod sdram_drv;
+mod mcu;
+mod mt48lc4m32b2;
 
 use alloc::boxed::Box;
 use defmt::*;
@@ -16,14 +17,9 @@ use embassy_stm32::ltdc::{
 };
 use embassy_stm32::pac::ltdc::vals::{Bf1, Bf2, Imr, Pf};
 use embassy_stm32::pac::RCC;
-use embassy_stm32::time::mhz;
 use embassy_time::Timer;
 
 extern crate alloc;
-use embedded_alloc::TlsfHeap as Heap;
-
-#[global_allocator]
-static HEAP: Heap = Heap::empty();
 
 use embedded_graphics::geometry::Size;
 use embedded_graphics::mono_font::{self, ascii};
@@ -32,6 +28,8 @@ use kolibri_embedded_gui::button::Button;
 use kolibri_embedded_gui::checkbox::Checkbox;
 use kolibri_embedded_gui::label::Label;
 use kolibri_embedded_gui::ui::Ui;
+
+use mcu::{rcc_setup, ALLOCATOR};
 
 use {defmt_rtt as _, panic_probe as _};
 
@@ -261,51 +259,7 @@ async fn display_task() -> ! {
 
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
-    use embassy_stm32::rcc::{
-        AHBPrescaler, APBPrescaler, Hse, HseMode, Pll, PllMul, PllPDiv, PllPreDiv, PllQDiv,
-        PllRDiv, PllSource, Sysclk,
-    };
-
-    let mut config = embassy_stm32::Config::default();
-    config.rcc.sys = Sysclk::PLL1_P;
-    config.rcc.ahb_pre = AHBPrescaler::DIV1;
-    config.rcc.apb1_pre = APBPrescaler::DIV4;
-    config.rcc.apb2_pre = APBPrescaler::DIV2;
-
-    // HSE is on and ready
-    config.rcc.hse = Some(Hse {
-        freq: mhz(25),
-        mode: HseMode::Oscillator,
-    });
-    config.rcc.pll_src = PllSource::HSE;
-
-    config.rcc.pll = Some(Pll {
-        prediv: PllPreDiv::DIV25,  // PLLM
-        mul: PllMul::MUL400,       // PLLN
-        divp: Some(PllPDiv::DIV2), // SYSCLK = 400/2 = 200 MHz
-        divq: Some(PllQDiv::DIV9), // PLLQ = 400/9 = 44.44 MHz
-        divr: None,
-    });
-
-    // This seems to be working, the values in the RCC.PLLSAICFGR are correct according to the debugger. Also on and ready according to CR
-    config.rcc.pllsai = Some(Pll {
-        prediv: PllPreDiv::DIV25,  // Actually ignored
-        mul: PllMul::MUL384,       // PLLN
-        divp: Some(PllPDiv::DIV8), // PLLP
-        divq: Some(PllQDiv::DIV2), // PLLQ
-        divr: Some(PllRDiv::DIV5), // PLLR
-    });
-
-    // PLLI2S
-    config.rcc.plli2s = Some(Pll {
-        prediv: PllPreDiv::DIV25,  // Actually ignored
-        mul: PllMul::MUL100,       // PLLN
-        divp: Some(PllPDiv::DIV2), // PLLP
-        divq: Some(PllQDiv::DIV2), // PLLQ
-        divr: Some(PllRDiv::DIV2), // PLLR (I2S PLLR is always 2)
-    });
-
-    let p = embassy_stm32::init(config);
+    let p = rcc_setup::stm32f746ng_init();
     info!("Starting...");
 
     // Config SDRAM
@@ -331,7 +285,7 @@ async fn main(_spawner: Spawner) {
         p.PH3,  // SDNE0 (!CS)
         p.PF11, // SDRAS
         p.PH5,  // SDNWE
-        sdram_drv::mt48lc4m32b2_6::Mt48lc4m32b2 {},
+        mt48lc4m32b2::mt48lc4m32b2_6::Mt48lc4m32b2 {},
     );
 
     let mut delay = embassy_time::Delay;
@@ -343,7 +297,7 @@ async fn main(_spawner: Spawner) {
         info!("SDRAM Initialized at {:x}", ram_ptr as usize);
 
         // Convert raw pointer to slice
-        HEAP.init(ram_ptr as usize, SDRAM_SIZE)
+        ALLOCATOR.init(ram_ptr as usize, SDRAM_SIZE)
     };
 
     // Configure the LTDC Pins
