@@ -1,9 +1,10 @@
 #![no_std]
 #![no_main]
 
+extern crate alloc;
+
 mod display_target;
 mod mcu;
-mod mt48lc4m32b2;
 
 use alloc::boxed::Box;
 use defmt::*;
@@ -19,8 +20,6 @@ use embassy_stm32::pac::ltdc::vals::{Bf1, Bf2, Imr, Pf};
 use embassy_stm32::pac::RCC;
 use embassy_time::Timer;
 
-extern crate alloc;
-
 use embedded_graphics::geometry::Size;
 use embedded_graphics::mono_font::{self, ascii};
 use embedded_graphics::pixelcolor::{Rgb888, RgbColor, WebColors};
@@ -29,7 +28,7 @@ use kolibri_embedded_gui::checkbox::Checkbox;
 use kolibri_embedded_gui::label::Label;
 use kolibri_embedded_gui::ui::Ui;
 
-use mcu::{rcc_setup, ALLOCATOR};
+use mcu::{mt48lc4m32b2, rcc_setup, ALLOCATOR};
 
 use {defmt_rtt as _, panic_probe as _};
 
