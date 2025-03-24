@@ -1,0 +1,52 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "probe-rs-debug",
+            "request": "attach",
+            "name": "probe-rs Debug Attach",
+            "cwd": "",
+            "connectUnderReset": false,
+            "chip": "STM32F746NGHx",
+            "coreConfigs": [
+                {
+                    "coreIndex": 0,
+                    "programBinary": "./target/thumbv7em-none-eabi/debug/myjrny-hub"
+                }
+            ],
+            "speed": 500
+        },
+        {
+            "type": "probe-rs-debug",
+            "request": "attach",
+            "name": "probe-rs Attach",
+            "chip": "STM32F746NGHx",
+            "coreConfigs": [
+                {
+                    "coreIndex": 0,
+                    "programBinary": "./target/thumbv7em-none-eabi/release/myjrny-hub"
+                }
+            ],
+            "speed": 500
+        },
+        {
+            "type": "probe-rs-debug",
+            "request": "launch",
+            "name": "probe-rs Test",
+            "cwd": "${workspaceFolder}",
+            "connectUnderReset": true,
+            "chip": "STM32F746NGHx",
+            "flashingConfig": {
+                "flashingEnabled": true,
+                "haltAfterReset": true
+            },
+            "coreConfigs": [
+                {
+                    "coreIndex": 0,
+                    "programBinary": "./target/thumbv7em-none-eabi/release/myjrny-hub"
+                }
+            ],
+            "speed": 500
+        }
+    ]
+}

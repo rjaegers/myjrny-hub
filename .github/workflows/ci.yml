@@ -1,0 +1,27 @@
+---
+name: Continuous Integration
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.ref }}-${{ github.workflow }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: read
+
+jobs:
+  static-checks:
+    runs-on: ubuntu-latest
+    container: ghcr.io/philips-software/amp-devcontainer-rust:5.6.2@sha256:55de506d649d9273bee60aa5737987cf1b8005d89fa9ad96b5e1203e89ad512d
+    steps:
+      - uses: actions/checkout@9bb56186c3b09b4f86b1c65136769dd318469633 # v4.1.2
+        with:
+          persist-credentials: false
+      - run: cargo fmt -- --check
+      - run: cargo clippy -- --deny warnings
