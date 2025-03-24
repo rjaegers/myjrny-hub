@@ -22,7 +22,7 @@ use embassy_time::Timer;
 
 use embedded_graphics::geometry::Size;
 use embedded_graphics::mono_font::{self, ascii};
-use embedded_graphics::pixelcolor::{Rgb888, RgbColor, WebColors};
+use embedded_graphics::pixelcolor::{Rgb565, RgbColor, WebColors};
 use kolibri_embedded_gui::button::Button;
 use kolibri_embedded_gui::checkbox::Checkbox;
 use kolibri_embedded_gui::label::Label;
@@ -46,7 +46,7 @@ async fn display_task() -> ! {
     const WINDOW_X1: u16 = LCD_X_SIZE; // 480 for ferris
     const WINDOW_Y0: u16 = 0;
     const WINDOW_Y1: u16 = LCD_Y_SIZE; // 800 for ferris
-    const PIXEL_FORMAT: Pf = Pf::ARGB8888;
+    const PIXEL_FORMAT: Pf = Pf::RGB565;
     //const FBStartAdress: u16 = FB_Address;
     const ALPHA: u8 = 255;
     const ALPHA0: u8 = 0;
@@ -97,8 +97,8 @@ async fn display_task() -> ! {
 
     // Allocate a buffer for the display on the heap
     const DISPLAY_BUFFER_SIZE: usize = LCD_X_SIZE as usize * LCD_Y_SIZE as usize;
-    let mut display_buffer_1 = Box::<[u32; DISPLAY_BUFFER_SIZE]>::new([0; DISPLAY_BUFFER_SIZE]);
-    let mut display_buffer_2 = Box::<[u32; DISPLAY_BUFFER_SIZE]>::new([0; DISPLAY_BUFFER_SIZE]);
+    let mut display_buffer_1 = Box::<[u16; DISPLAY_BUFFER_SIZE]>::new([0; DISPLAY_BUFFER_SIZE]);
+    let mut display_buffer_2 = Box::<[u16; DISPLAY_BUFFER_SIZE]>::new([0; DISPLAY_BUFFER_SIZE]);
     info!(
         "Display buffer allocated at {:x}, {:x}",
         &display_buffer_1[0] as *const _, &display_buffer_2[0] as *const _
@@ -128,25 +128,15 @@ async fn display_task() -> ! {
     // Delay for 1s
     Timer::after_millis(1000).await;
 
-    // Test memory
-    let mut boxed_int = Box::new(0xdeadbeefu32);
-
-    info!("Boxed int at {:x}", &*boxed_int as *const _);
-    info!("Boxed value: {:x}", *boxed_int);
-
-    *boxed_int += 1;
-
-    info!("Boxed value: {:x}", *boxed_int);
-
     // Create a display buffer
     let mut display_fb1 = display_target::DisplayBuffer {
-        buf: &mut display_buffer_1.as_mut_slice(),
+        buf: display_buffer_1.as_mut_slice(),
         width: LCD_X_SIZE as i32,
         height: LCD_Y_SIZE as i32,
     };
 
     let mut display_fb2 = display_target::DisplayBuffer {
-        buf: &mut display_buffer_2.as_mut_slice(),
+        buf: display_buffer_2.as_mut_slice(),
         width: LCD_X_SIZE as i32,
         height: LCD_Y_SIZE as i32,
     };
@@ -163,8 +153,8 @@ async fn display_task() -> ! {
 
     // Configures the color frame buffer pitch in byte
     LTDC.layer(0).cfblr().write(|w| {
-        w.set_cfbp(IMAGE_WIDTH * 4 as u16);
-        w.set_cfbll(((WINDOW_X1 - WINDOW_X0) * 4 as u16) + 3);
+        w.set_cfbp(IMAGE_WIDTH * 4_u16);
+        w.set_cfbll(((WINDOW_X1 - WINDOW_X0) * 4_u16) + 3);
     });
 
     // Configures the frame buffer line number
@@ -172,8 +162,8 @@ async fn display_task() -> ! {
         .cfblnr()
         .write(|w| w.set_cfblnbr(IMAGE_HEIGHT));
 
-    // Use ARGB8888 pixel format
-    LTDC.layer(0).pfcr().write(|w| w.set_pf(Pf::ARGB8888));
+    // Use RGB565 pixel format
+    LTDC.layer(0).pfcr().write(|w| w.set_pf(Pf::RGB565));
 
     // Enable the layer
     LTDC.layer(0).cr().modify(|w| w.set_len(true));
@@ -181,17 +171,17 @@ async fn display_task() -> ! {
     // Immediately refresh the display
     LTDC.srcr().modify(|w| w.set_imr(Imr::RELOAD));
 
-    pub fn medsize_rgb888_style() -> kolibri_embedded_gui::style::Style<Rgb888> {
+    pub fn medsize_rgb565_style() -> kolibri_embedded_gui::style::Style<Rgb565> {
         kolibri_embedded_gui::style::Style {
-            background_color: Rgb888::new(0x40, 0x80, 0x40), // pretty dark gray
-            item_background_color: Rgb888::new(0x20, 0x40, 0x20), // darker gray
-            highlight_item_background_color: Rgb888::new(0x10, 0x20, 0x10),
-            border_color: Rgb888::WHITE,
-            highlight_border_color: Rgb888::WHITE,
-            primary_color: Rgb888::CSS_DARK_CYAN,
-            secondary_color: Rgb888::YELLOW,
-            icon_color: Rgb888::WHITE,
-            text_color: Rgb888::WHITE,
+            background_color: Rgb565::new(0x40, 0x80, 0x40), // pretty dark gray
+            item_background_color: Rgb565::new(0x20, 0x40, 0x20), // darker gray
+            highlight_item_background_color: Rgb565::new(0x10, 0x20, 0x10),
+            border_color: Rgb565::WHITE,
+            highlight_border_color: Rgb565::WHITE,
+            primary_color: Rgb565::CSS_DARK_CYAN,
+            secondary_color: Rgb565::YELLOW,
+            icon_color: Rgb565::WHITE,
+            text_color: Rgb565::WHITE,
             default_widget_height: 16,
             border_width: 0,
             highlight_border_width: 1,
@@ -218,7 +208,7 @@ async fn display_task() -> ! {
         }
 
         // create UI (needs to be done each frame)
-        let mut ui = Ui::new_fullscreen(display, medsize_rgb888_style());
+        let mut ui = Ui::new_fullscreen(display, medsize_rgb565_style());
 
         // clear UI background (for non-incremental redrawing framebuffered applications)
         ui.clear_background().ok();
