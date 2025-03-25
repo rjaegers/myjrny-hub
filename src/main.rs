@@ -6,26 +6,24 @@ mod mcu;
 
 use defmt::*;
 use embassy_executor::Spawner;
-use embassy_stm32::bind_interrupts;
-use embassy_stm32::fmc::Fmc;
-use embassy_stm32::gpio::{Level, Output, Speed};
-use embassy_stm32::ltdc::{
-    self, Ltdc, LtdcConfiguration, LtdcLayer, LtdcLayerConfig, PolarityActive, PolarityEdge,
+use embassy_stm32::{
+    bind_interrupts,
+    fmc::Fmc,
+    gpio::{Level, Output, Speed},
+    ltdc::{
+        self, Ltdc, LtdcConfiguration, LtdcLayer, LtdcLayerConfig, PolarityActive, PolarityEdge,
+    },
+    pac::ltdc::vals::{Bf1, Bf2, Imr, Pf},
+    peripherals,
 };
-use embassy_stm32::pac::ltdc::vals::{Bf1, Bf2, Imr, Pf};
-use embassy_stm32::peripherals;
 use embassy_time::Timer;
-
-use embedded_graphics::geometry::Size;
-use embedded_graphics::mono_font::{self, ascii};
-use embedded_graphics::pixelcolor::{Rgb565, RgbColor, WebColors};
-use kolibri_embedded_gui::button::Button;
-use kolibri_embedded_gui::checkbox::Checkbox;
-use kolibri_embedded_gui::label::Label;
-use kolibri_embedded_gui::ui::Ui;
-
+use embedded_graphics::{
+    geometry::Size,
+    mono_font::{self, ascii},
+    pixelcolor::{Rgb565, RgbColor, WebColors},
+};
+use kolibri_embedded_gui::{button::Button, checkbox::Checkbox, label::Label, ui::Ui};
 use mcu::{mt48lc4m32b2, rcc_setup};
-
 use {defmt_rtt as _, panic_probe as _};
 
 bind_interrupts!(struct Irqs {
