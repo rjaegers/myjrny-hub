@@ -1,7 +1,6 @@
 pub type TargetPixelType = u16;
 use embassy_stm32::ltdc::{self, Ltdc, LtdcLayerConfig};
 
-#[allow(unused)]
 pub struct DoubleBuffer {
     buf0: &'static mut [TargetPixelType],
     buf1: &'static mut [TargetPixelType],
@@ -9,6 +8,7 @@ pub struct DoubleBuffer {
     layer_config: LtdcLayerConfig,
 }
 
+#[allow(unused)]
 impl DoubleBuffer {
     pub fn new(
         buf0: &'static mut [TargetPixelType],

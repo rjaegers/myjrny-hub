@@ -47,9 +47,11 @@ async fn display_task(
 
     info!("Display task started");
 
-    // Configures the color frame buffer pitch in byte
+    // Re-configure the LTDC layer to match the framebuffer
+    // the driver is incorrect for the DISCOVERY board
     LTDC.layer(0).cfblr().write(|w| {
-        w.set_cfbll((DISPLAY_WIDTH as u16 * 3_u16) + 3);
+        w.set_cfbp(DISPLAY_WIDTH as u16 * 4_u16);
+        w.set_cfbll((DISPLAY_WIDTH as u16 * 4_u16) + 3);
     });
 
     let mut i: u8 = 0;
