@@ -6,14 +6,14 @@ mod mcu;
 
 use defmt::*;
 use embassy_executor::Spawner;
+use embassy_stm32::bind_interrupts;
 use embassy_stm32::fmc::Fmc;
-use embassy_stm32::gpio::{AfType, Flex, Level, Output, OutputType, Speed};
+use embassy_stm32::gpio::{Level, Output, Speed};
 use embassy_stm32::ltdc::{
-    B0Pin, B1Pin, B2Pin, B3Pin, B4Pin, B5Pin, B6Pin, B7Pin, ClkPin, DePin, G0Pin, G1Pin, G2Pin,
-    G3Pin, G4Pin, G5Pin, G6Pin, G7Pin, HsyncPin, Ltdc, R0Pin, R1Pin, R2Pin, R3Pin, R4Pin, R5Pin,
-    R6Pin, R7Pin, VsyncPin,
+    self, Ltdc, LtdcConfiguration, LtdcLayer, LtdcLayerConfig, PolarityActive, PolarityEdge,
 };
 use embassy_stm32::pac::ltdc::vals::{Bf1, Bf2, Imr, Pf};
+use embassy_stm32::peripherals;
 use embassy_time::Timer;
 
 use embedded_graphics::geometry::Size;
@@ -27,6 +27,10 @@ use kolibri_embedded_gui::ui::Ui;
 use mcu::{mt48lc4m32b2, rcc_setup};
 
 use {defmt_rtt as _, panic_probe as _};
+
+bind_interrupts!(struct Irqs {
+    LTDC => ltdc::InterruptHandler<peripherals::LTDC>;
+});
 
 const DISPLAY_WIDTH: usize = 480;
 const DISPLAY_HEIGHT: usize = 272;
@@ -315,187 +319,84 @@ async fn main(_spawner: Spawner) {
 
     info!("SDRAM Initialized at {:x}", ram_ptr as usize);
 
-    // Configure the LTDC Pins
-    const DATA_AF: AfType = AfType::output(OutputType::PushPull, Speed::Low);
+    // set up the LTDC peripheral to send data to the LCD screen
+    // setting timing for AM480272H3TMQW-T01H LCD (MB1046 B-01)
+    const AM480272H3TMQW_HSYNC: u16 = 41; // Horizontal synchronization
+    const AM480272H3TMQW_HBP: u16 = 13; // Horizontal back porch
+    const AM480272H3TMQW_HFP: u16 = 32; // Horizontal front porch
+    const AM480272H3TMQW_VSYNC: u16 = 10; // Vertical synchronization
+    const AM480272H3TMQW_VBP: u16 = 2; // Vertical back porch
+    const AM480272H3TMQW_VFP: u16 = 2; // Vertical front porch
 
-    // R: PI15, PJ0..6, 8 bits
-    let ltdc_r0_af = p.PI15.af_num();
-    let mut ltdc_r0 = Flex::new(p.PI15);
-    ltdc_r0.set_as_af_unchecked(ltdc_r0_af, DATA_AF);
+    let ltdc_config = LtdcConfiguration {
+        active_width: DISPLAY_WIDTH as _,
+        active_height: DISPLAY_HEIGHT as _,
+        h_back_porch: AM480272H3TMQW_HBP,
+        h_front_porch: AM480272H3TMQW_HFP,
+        v_back_porch: AM480272H3TMQW_VBP,
+        v_front_porch: AM480272H3TMQW_VFP,
+        h_sync: AM480272H3TMQW_HSYNC,
+        v_sync: AM480272H3TMQW_VSYNC,
+        h_sync_polarity: PolarityActive::ActiveLow,
+        v_sync_polarity: PolarityActive::ActiveLow,
+        data_enable_polarity: PolarityActive::ActiveLow,
+        pixel_clock_polarity: PolarityEdge::RisingEdge,
+    };
 
-    let ltdc_r1_af = p.PJ0.af_num();
-    let mut ltdc_r1 = Flex::new(p.PJ0);
-    ltdc_r1.set_as_af_unchecked(ltdc_r1_af, DATA_AF);
+    let mut ltdc_de = Output::new(p.PK7, Level::Low, Speed::High);
+    let mut ltdc_disp_ctrl = Output::new(p.PI12, Level::Low, Speed::High);
+    let mut ltdc_bl_ctrl = Output::new(p.PK3, Level::Low, Speed::High);
 
-    let ltdc_r2_af = p.PJ1.af_num();
-    let mut ltdc_r2 = Flex::new(p.PJ1);
-    ltdc_r2.set_as_af_unchecked(ltdc_r2_af, DATA_AF);
+    let mut ltdc = Ltdc::new_with_pins(
+        p.LTDC, // PERIPHERAL
+        Irqs,   // IRQS
+        p.PI14, // CLK
+        p.PI10, // HSYNC
+        p.PI9,  // VSYNC
+        // B: PE4, PJ13..15, PG12, PK4..6, 8 bits
+        p.PE4,  // B0
+        p.PJ13, // B1
+        p.PJ14, // B2
+        p.PJ15, // B3
+        p.PG12, // B4
+        p.PK4,  // B5
+        p.PK5,  // B6
+        p.PK6,  // B7
+        // G: PJ7..11, PK0..2, 8 bits
+        p.PJ7,  // G0
+        p.PJ8,  // G1
+        p.PJ9,  // G2
+        p.PJ10, // G3
+        p.PJ11, // G4
+        p.PK0,  // G5
+        p.PK1,  // G6
+        p.PK2,  // G7
+        // R: PI15, PJ0..6, 8 bits
+        p.PI15, // R0
+        p.PJ0,  // R1
+        p.PJ1,  // R2
+        p.PJ2,  // R3
+        p.PJ3,  // R4
+        p.PJ4,  // R5
+        p.PJ5,  // R6
+        p.PJ6,  // R7
+    );
+    ltdc.init(&ltdc_config);
+    ltdc_de.set_low();
+    ltdc_bl_ctrl.set_high();
+    ltdc_disp_ctrl.set_high();
 
-    let ltdc_r3_af = p.PJ2.af_num();
-    let mut ltdc_r3 = Flex::new(p.PJ2);
-    ltdc_r3.set_as_af_unchecked(ltdc_r3_af, DATA_AF);
+    let layer_config = LtdcLayerConfig {
+        pixel_format: ltdc::PixelFormat::RGB565,
+        layer: LtdcLayer::Layer1,
+        window_x0: 0,
+        window_x1: DISPLAY_WIDTH as _,
+        window_y0: 0,
+        window_y1: DISPLAY_HEIGHT as _,
+    };
 
-    let ltdc_r4_af = p.PJ3.af_num();
-    let mut ltdc_r4 = Flex::new(p.PJ3);
-    ltdc_r4.set_as_af_unchecked(ltdc_r4_af, DATA_AF);
-
-    let ltdc_r5_af = p.PJ4.af_num();
-    let mut ltdc_r5 = Flex::new(p.PJ4);
-    ltdc_r5.set_as_af_unchecked(ltdc_r5_af, DATA_AF);
-
-    let ltdc_r6_af = p.PJ5.af_num();
-    let mut ltdc_r6 = Flex::new(p.PJ5);
-    ltdc_r6.set_as_af_unchecked(ltdc_r6_af, DATA_AF);
-
-    let ltdc_r7_af = p.PJ6.af_num();
-    let mut ltdc_r7 = Flex::new(p.PJ6);
-    ltdc_r7.set_as_af_unchecked(ltdc_r7_af, DATA_AF);
-
-    // G: PJ7..11, PK0..2, 8 bits
-    let ltdc_g0_af = p.PJ7.af_num();
-    let mut ltdc_g0 = Flex::new(p.PJ7);
-    ltdc_g0.set_as_af_unchecked(ltdc_g0_af, DATA_AF);
-
-    let ltdc_g1_af = p.PJ8.af_num();
-    let mut ltdc_g1 = Flex::new(p.PJ8);
-    ltdc_g1.set_as_af_unchecked(ltdc_g1_af, DATA_AF);
-
-    let ltdc_g2_af = p.PJ9.af_num();
-    let mut ltdc_g2 = Flex::new(p.PJ9);
-    ltdc_g2.set_as_af_unchecked(ltdc_g2_af, DATA_AF);
-
-    let ltdc_g3_af = p.PJ10.af_num();
-    let mut ltdc_g3 = Flex::new(p.PJ10);
-    ltdc_g3.set_as_af_unchecked(ltdc_g3_af, DATA_AF);
-
-    let ltdc_g4_af = p.PJ11.af_num();
-    let mut ltdc_g4 = Flex::new(p.PJ11);
-    ltdc_g4.set_as_af_unchecked(ltdc_g4_af, DATA_AF);
-
-    let ltdc_g5_af = p.PK0.af_num();
-    let mut ltdc_g5 = Flex::new(p.PK0);
-    ltdc_g5.set_as_af_unchecked(ltdc_g5_af, DATA_AF);
-
-    let ltdc_g6_af = p.PK1.af_num();
-    let mut ltdc_g6 = Flex::new(p.PK1);
-    ltdc_g6.set_as_af_unchecked(ltdc_g6_af, DATA_AF);
-
-    let ltdc_g7_af = p.PK2.af_num();
-    let mut ltdc_g7 = Flex::new(p.PK2);
-    ltdc_g7.set_as_af_unchecked(ltdc_g7_af, DATA_AF);
-
-    // B: PE4, PJ13..15, PG12, PK4..6, 8 bits
-    let ltdc_b0_af = p.PE4.af_num();
-    let mut ltdc_b0 = Flex::new(p.PE4);
-    ltdc_b0.set_as_af_unchecked(ltdc_b0_af, DATA_AF);
-
-    let ltdc_b1_af = p.PJ13.af_num();
-    let mut ltdc_b1 = Flex::new(p.PJ13);
-    ltdc_b1.set_as_af_unchecked(ltdc_b1_af, DATA_AF);
-
-    let ltdc_b2_af = p.PJ14.af_num();
-    let mut ltdc_b2 = Flex::new(p.PJ14);
-    ltdc_b2.set_as_af_unchecked(ltdc_b2_af, DATA_AF);
-
-    let ltdc_b3_af = p.PJ15.af_num();
-    let mut ltdc_b3 = Flex::new(p.PJ15);
-    ltdc_b3.set_as_af_unchecked(ltdc_b3_af, DATA_AF);
-
-    let ltdc_b4_af = B4Pin::af_num(&p.PG12);
-    let mut ltdc_b4 = Flex::new(p.PG12);
-    ltdc_b4.set_as_af_unchecked(ltdc_b4_af, DATA_AF);
-
-    let ltdc_b5_af = p.PK4.af_num();
-    let mut ltdc_b5 = Flex::new(p.PK4);
-    ltdc_b5.set_as_af_unchecked(ltdc_b5_af, DATA_AF);
-
-    let ltdc_b6_af = p.PK5.af_num();
-    let mut ltdc_b6 = Flex::new(p.PK5);
-    ltdc_b6.set_as_af_unchecked(ltdc_b6_af, DATA_AF);
-
-    let ltdc_b7_af = p.PK6.af_num();
-    let mut ltdc_b7 = Flex::new(p.PK6);
-    ltdc_b7.set_as_af_unchecked(ltdc_b7_af, DATA_AF);
-
-    // HSYNC: PI10
-    let ltdc_hsync_af = p.PI10.af_num();
-    let mut ltdc_hsync = Flex::new(p.PI10);
-    ltdc_hsync.set_as_af_unchecked(ltdc_hsync_af, DATA_AF);
-
-    // VSYNC: PI9
-    let ltdc_vsync_af = p.PI9.af_num();
-    let mut ltdc_vsync = Flex::new(p.PI9);
-    ltdc_vsync.set_as_af_unchecked(ltdc_vsync_af, DATA_AF);
-
-    // CLK: PI14
-    let ltdc_clk_af = p.PI14.af_num();
-    let mut ltdc_clk = Flex::new(p.PI14);
-    ltdc_clk.set_as_af_unchecked(ltdc_clk_af, DATA_AF);
-
-    // DE: PK7
-    let ltdc_de_af = p.PK7.af_num();
-    let mut ltdc_de = Flex::new(p.PK7);
-    ltdc_de.set_as_af_unchecked(ltdc_de_af, DATA_AF);
-
-    // Enable the LCD-TFT controller
-    let _lcd_en = Output::new(p.PI12, Level::High, Speed::Low);
-
-    // Enable the backlight
-    let _backlight = Output::new(p.PK3, Level::High, Speed::Low);
-
-    let mut ltdc = Ltdc::new(p.LTDC);
-
-    ltdc.disable();
-
-    use embassy_stm32::pac::LTDC;
-
-    // Set the LTDC to 480x272
-    LTDC.gcr().modify(|w| {
-        w.set_hspol(embassy_stm32::pac::ltdc::vals::Hspol::ACTIVE_LOW);
-        w.set_vspol(embassy_stm32::pac::ltdc::vals::Vspol::ACTIVE_LOW);
-        w.set_depol(embassy_stm32::pac::ltdc::vals::Depol::ACTIVE_LOW);
-        w.set_pcpol(embassy_stm32::pac::ltdc::vals::Pcpol::RISING_EDGE);
-    });
-
-    // Set Sync signals
-    LTDC.sscr().write(|w| {
-        w.set_hsw(41);
-        w.set_vsh(10);
-    });
-
-    // Set Accumulated Back porch
-    LTDC.bpcr().modify(|w| {
-        w.set_ahbp(53);
-        w.set_avbp(11);
-    });
-
-    // Set Accumulated Active Width
-    LTDC.awcr().modify(|w| {
-        w.set_aah(283);
-        w.set_aaw(533);
-    });
-
-    // Set Total Width
-    LTDC.twcr().modify(|w| {
-        w.set_totalh(285);
-        w.set_totalw(565);
-    });
-
-    // Set the background color value
-    LTDC.bccr().modify(|w| {
-        w.set_bcred(0);
-        w.set_bcgreen(0);
-        w.set_bcblue(0)
-    });
-
-    // Enable the Transfer Error and FIFO underrun interrupts
-    LTDC.ier().modify(|w| {
-        w.set_terrie(true);
-        w.set_fuie(true);
-    });
-
-    // Enable the LTDC
-    ltdc.enable();
+    // enable the bottom layer
+    ltdc.init_layer(&layer_config, None);
 
     // Start the display task
     let spawner = Spawner::for_current_executor().await;
