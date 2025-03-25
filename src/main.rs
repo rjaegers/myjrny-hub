@@ -1,12 +1,9 @@
 #![no_std]
 #![no_main]
 
-extern crate alloc;
-
 mod display_target;
 mod mcu;
 
-use alloc::boxed::Box;
 use defmt::*;
 use embassy_executor::Spawner;
 use embassy_stm32::fmc::Fmc;
@@ -27,9 +24,17 @@ use kolibri_embedded_gui::checkbox::Checkbox;
 use kolibri_embedded_gui::label::Label;
 use kolibri_embedded_gui::ui::Ui;
 
-use mcu::{mt48lc4m32b2, rcc_setup, ALLOCATOR};
+use mcu::{mt48lc4m32b2, rcc_setup};
 
 use {defmt_rtt as _, panic_probe as _};
+
+const DISPLAY_WIDTH: usize = 480;
+const DISPLAY_HEIGHT: usize = 272;
+
+#[link_section = ".frame_buffer"]
+static mut FB1: [u16; DISPLAY_WIDTH * DISPLAY_HEIGHT] = [0; DISPLAY_WIDTH * DISPLAY_HEIGHT];
+#[link_section = ".frame_buffer"]
+static mut FB2: [u16; DISPLAY_WIDTH * DISPLAY_HEIGHT] = [0; DISPLAY_WIDTH * DISPLAY_HEIGHT];
 
 #[embassy_executor::task()]
 async fn display_task() -> ! {
@@ -94,18 +99,21 @@ async fn display_task() -> ! {
         w.set_bf2(Bf2::CONSTANT);
     });
 
-    // Allocate a buffer for the display on the heap
-    const DISPLAY_BUFFER_SIZE: usize = LCD_X_SIZE as usize * LCD_Y_SIZE as usize;
-    let mut display_buffer_1 = Box::<[u16; DISPLAY_BUFFER_SIZE]>::new([0; DISPLAY_BUFFER_SIZE]);
-    let mut display_buffer_2 = Box::<[u16; DISPLAY_BUFFER_SIZE]>::new([0; DISPLAY_BUFFER_SIZE]);
+    let (display_buffer_1, display_buffer_2) = unsafe {
+        (
+            &mut *core::ptr::addr_of_mut!(FB1),
+            &mut *core::ptr::addr_of_mut!(FB2),
+        )
+    };
+
     info!(
-        "Display buffer allocated at {:x}, {:x}",
-        &display_buffer_1[0] as *const _, &display_buffer_2[0] as *const _
+        "Display buffers allocated at {:x}, {:x}",
+        display_buffer_1 as *const _, display_buffer_2 as *const _
     );
 
     LTDC.layer(0)
         .cfbar()
-        .write(|w| w.set_cfbadd(&display_buffer_1[0] as *const _ as u32));
+        .write(|w| w.set_cfbadd(display_buffer_1 as *const _ as u32));
 
     // Configures the color frame buffer pitch in byte
     LTDC.layer(0).cfblr().write(|w| {
@@ -129,13 +137,13 @@ async fn display_task() -> ! {
 
     // Create a display buffer
     let mut display_fb1 = display_target::DisplayBuffer {
-        buf: display_buffer_1.as_mut_slice(),
+        buf: display_buffer_1,
         width: LCD_X_SIZE as i32,
         height: LCD_Y_SIZE as i32,
     };
 
     let mut display_fb2 = display_target::DisplayBuffer {
-        buf: display_buffer_2.as_mut_slice(),
+        buf: display_buffer_2,
         width: LCD_X_SIZE as i32,
         height: LCD_Y_SIZE as i32,
     };
@@ -221,7 +229,7 @@ async fn display_task() -> ! {
         if ui.add_horizontal(Button::new("-")).clicked() {
             i = i.saturating_sub(1);
         }
-        ui.add_horizontal(Label::new(alloc::format!("Clicked {} times", i).as_ref()));
+        //ui.add_horizontal(Label::new(alloc::format!("Clicked {} times", i).as_ref()));
         if ui.add_horizontal(Button::new("+")).clicked() {
             i = i.saturating_add(1);
         }
@@ -252,19 +260,47 @@ async fn main(_spawner: Spawner) {
     // ----------------------------------------------------------
     // Configure MPU for external SDRAM (64 Mbit = 8 Mbyte)
     // MPU is disabled by default
-    const SDRAM_SIZE: usize = 8 * 1024 * 1024;
 
-    #[rustfmt::skip]
+    let mut delay = embassy_time::Delay;
+
     let mut sdram = Fmc::sdram_a12bits_d16bits_4banks_bank1(
         p.FMC,
         // A0-A11
-        p.PF0, p.PF1, p.PF2, p.PF3, p.PF4, p.PF5, p.PF12, p.PF13, p.PF14, p.PF15, p.PG0, p.PG1,
+        p.PF0,
+        p.PF1,
+        p.PF2,
+        p.PF3,
+        p.PF4,
+        p.PF5,
+        p.PF12,
+        p.PF13,
+        p.PF14,
+        p.PF15,
+        p.PG0,
+        p.PG1,
         // BA0-BA1
-        p.PG4, p.PG5,
+        p.PG4,
+        p.PG5,
         // D0-D15
-        p.PD14, p.PD15, p.PD0, p.PD1, p.PE7, p.PE8, p.PE9, p.PE10, p.PE11, p.PE12, p.PE13, p.PE14, p.PE15, p.PD8, p.PD9, p.PD10,
+        p.PD14,
+        p.PD15,
+        p.PD0,
+        p.PD1,
+        p.PE7,
+        p.PE8,
+        p.PE9,
+        p.PE10,
+        p.PE11,
+        p.PE12,
+        p.PE13,
+        p.PE14,
+        p.PE15,
+        p.PD8,
+        p.PD9,
+        p.PD10,
         // NBL0 - NBL1
-        p.PE0, p.PE1,
+        p.PE0,
+        p.PE1,
         p.PC3,  // SDCKE0
         p.PG8,  // SDCLK
         p.PG15, // SDNCAS
@@ -274,17 +310,10 @@ async fn main(_spawner: Spawner) {
         mt48lc4m32b2::mt48lc4m32b2_6::Mt48lc4m32b2 {},
     );
 
-    let mut delay = embassy_time::Delay;
+    // Initialise controller and SDRAM
+    let ram_ptr: *mut u32 = sdram.init(&mut delay) as *mut _;
 
-    unsafe {
-        // Initialise controller and SDRAM
-        let ram_ptr: *mut u32 = sdram.init(&mut delay) as *mut _;
-
-        info!("SDRAM Initialized at {:x}", ram_ptr as usize);
-
-        // Convert raw pointer to slice
-        ALLOCATOR.init(ram_ptr as usize, SDRAM_SIZE)
-    };
+    info!("SDRAM Initialized at {:x}", ram_ptr as usize);
 
     // Configure the LTDC Pins
     const DATA_AF: AfType = AfType::output(OutputType::PushPull, Speed::Low);

@@ -2,7 +2,6 @@ use embassy_stm32::time::mhz;
 use embassy_stm32::{rcc, Config, Peripherals};
 
 /// Sets up clocks for the stm32f746ng mcu
-/// change this if you plan to use a different microcontroller
 pub fn stm32f746ng_init() -> Peripherals {
     // setup power and clocks for an 32F746GDISCOVERY run from an external 25 Mhz oscillator
     let mut config = Config::default();
