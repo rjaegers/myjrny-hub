@@ -17,7 +17,6 @@ use embassy_stm32::ltdc::{
     R6Pin, R7Pin, VsyncPin,
 };
 use embassy_stm32::pac::ltdc::vals::{Bf1, Bf2, Imr, Pf};
-use embassy_stm32::pac::RCC;
 use embassy_time::Timer;
 
 use embedded_graphics::geometry::Size;
@@ -418,15 +417,6 @@ async fn main(_spawner: Spawner) {
     let _backlight = Output::new(p.PK3, Level::High, Speed::Low);
 
     let mut ltdc = Ltdc::new(p.LTDC);
-
-    critical_section::with(|_cs| {
-        // RM says the pllsaidivr should only be changed when pllsai is off. But this could have other unintended side effects. So let's just give it a try like this.
-        // According to the debugger, this bit gets set, anyway.
-        RCC.dckcfgr1()
-            .modify(|w| w.set_pllsaidivr(embassy_stm32::pac::rcc::vals::Pllsaidivr::DIV8));
-    });
-
-    embassy_stm32::rcc::enable_and_reset::<embassy_stm32::peripherals::LTDC>();
 
     ltdc.disable();
 
