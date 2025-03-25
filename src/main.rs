@@ -13,13 +13,12 @@ use embassy_stm32::{
     ltdc::{
         self, Ltdc, LtdcConfiguration, LtdcLayer, LtdcLayerConfig, PolarityActive, PolarityEdge,
     },
-    pac::ltdc::vals::Imr,
     peripherals,
 };
 use embassy_time::Timer;
 use embedded_graphics::mono_font::ascii;
 use kolibri_embedded_gui::{
-    button::Button, checkbox::Checkbox, label::Label, style::medsize_rgb565_style, ui::Ui,
+    button::Button, checkbox::Checkbox, label::Label, style::medsize_sakura_rgb565_style, ui::Ui,
 };
 use mcu::{double_buffer::DoubleBuffer, mt48lc4m32b2, rcc_setup};
 use {defmt_rtt as _, panic_probe as _};
@@ -48,65 +47,22 @@ async fn display_task(
 
     info!("Display task started");
 
-    /* Initialize the LCD pixel width and pixel height */
-    const WINDOW_X0: u16 = 0;
-    const WINDOW_X1: u16 = DISPLAY_WIDTH as _;
-    const IMAGE_WIDTH: u16 = DISPLAY_WIDTH as _;
-
-    let (display_buffer_1, display_buffer_2) = unsafe {
-        (
-            &mut *core::ptr::addr_of_mut!(FB1),
-            &mut *core::ptr::addr_of_mut!(FB2),
-        )
-    };
-
-    LTDC.layer(0)
-        .cfbar()
-        .write(|w| w.set_cfbadd(display_buffer_1 as *const _ as u32));
-
-    // Create a display buffer
-    let mut display_fb1 = display_target::DisplayBuffer {
-        buf: display_buffer_1,
-        width: DISPLAY_WIDTH as i32,
-        height: DISPLAY_HEIGHT as i32,
-    };
-
-    let mut display_fb2 = display_target::DisplayBuffer {
-        buf: display_buffer_2,
-        width: DISPLAY_WIDTH as i32,
-        height: DISPLAY_HEIGHT as i32,
-    };
-
-    let mut display = &mut display_fb1;
-
-    // replace the buffer with the new one
-    LTDC.layer(0)
-        .cfbar()
-        .write(|w| w.set_cfbadd(&display.buf[0] as *const _ as u32));
-
     // Configures the color frame buffer pitch in byte
     LTDC.layer(0).cfblr().write(|w| {
-        w.set_cfbp(IMAGE_WIDTH * 4_u16);
-        w.set_cfbll(((WINDOW_X1 - WINDOW_X0) * 4_u16) + 3);
+        w.set_cfbll((DISPLAY_WIDTH as u16 * 3_u16) + 3);
     });
 
-    // Immediately refresh the display
-    LTDC.srcr().modify(|w| w.set_imr(Imr::RELOAD));
+    let mut i: u8 = 0;
 
-    let mut i: i32 = 0;
-    let mut active_buffer = 0;
     loop {
-        // Switch buffers
-        if active_buffer == 0 {
-            display = &mut display_fb1;
-            active_buffer = 1;
-        } else {
-            display = &mut display_fb2;
-            active_buffer = 0;
-        }
+        let mut display = display_target::DisplayBuffer {
+            buf: double_buffer.current(),
+            width: DISPLAY_WIDTH as i32,
+            height: DISPLAY_HEIGHT as i32,
+        };
 
         // create UI (needs to be done each frame)
-        let mut ui = Ui::new_fullscreen(display, medsize_rgb565_style());
+        let mut ui = Ui::new_fullscreen(&mut display, medsize_sakura_rgb565_style());
 
         // clear UI background (for non-incremental redrawing framebuffered applications)
         ui.clear_background().ok();
@@ -130,13 +86,7 @@ async fn display_task(
         let mut checked = true;
         ui.add(Checkbox::new(&mut checked));
 
-        // replace the buffer with the new one
-        LTDC.layer(0)
-            .cfbar()
-            .write(|w| w.set_cfbadd(&display.buf[0] as *const _ as u32));
-
-        // Immediately refresh the display
-        LTDC.srcr().modify(|w| w.set_imr(Imr::RELOAD));
+        double_buffer.swap(&mut ltdc).await.unwrap();
 
         Timer::after_millis(20).await;
     }
