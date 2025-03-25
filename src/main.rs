@@ -218,8 +218,6 @@ async fn display_task() -> ! {
 
         ui.add(Label::new("Basic Counter (7LOC)"));
 
-        i += 1;
-
         if ui.add_horizontal(Button::new("-")).clicked() {
             i = i.saturating_sub(1);
         }
