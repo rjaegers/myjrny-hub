@@ -13,7 +13,7 @@ use embassy_stm32::{
     ltdc::{
         self, Ltdc, LtdcConfiguration, LtdcLayer, LtdcLayerConfig, PolarityActive, PolarityEdge,
     },
-    pac::ltdc::vals::{Bf1, Bf2, Imr, Pf},
+    pac::ltdc::vals::Imr,
     peripherals,
 };
 use embassy_time::Timer;
@@ -44,62 +44,10 @@ async fn display_task() -> ! {
 
     info!("Display task started");
 
-    const LCD_X_SIZE: u16 = 480;
-    const LCD_Y_SIZE: u16 = 272;
-
     /* Initialize the LCD pixel width and pixel height */
     const WINDOW_X0: u16 = 0;
-    const WINDOW_X1: u16 = LCD_X_SIZE; // 480 for ferris
-    const WINDOW_Y0: u16 = 0;
-    const WINDOW_Y1: u16 = LCD_Y_SIZE; // 800 for ferris
-    const PIXEL_FORMAT: Pf = Pf::RGB565;
-    //const FBStartAdress: u16 = FB_Address;
-    const ALPHA: u8 = 255;
-    const ALPHA0: u8 = 0;
-    const BACKCOLOR_BLUE: u8 = 0;
-    const BACKCOLOR_GREEN: u8 = 0;
-    const BACKCOLOR_RED: u8 = 0;
-    const IMAGE_WIDTH: u16 = LCD_X_SIZE; // 480 for ferris
-    const IMAGE_HEIGHT: u16 = LCD_Y_SIZE; // 800 for ferris
-
-    const PIXEL_SIZE: u8 = match PIXEL_FORMAT {
-        Pf::ARGB8888 => 4,
-        Pf::RGB888 => 3,
-        Pf::ARGB4444 | Pf::RGB565 | Pf::ARGB1555 | Pf::AL88 => 2,
-        _ => 1,
-    };
-
-    // Configure the horizontal start and stop position
-    LTDC.layer(0).whpcr().write(|w| {
-        w.set_whstpos(LTDC.bpcr().read().ahbp() + 1 + WINDOW_X0);
-        w.set_whsppos(LTDC.bpcr().read().ahbp() + WINDOW_X1);
-    });
-
-    // Configures the vertical start and stop position
-    LTDC.layer(0).wvpcr().write(|w| {
-        w.set_wvstpos(LTDC.bpcr().read().avbp() + 1 + WINDOW_Y0);
-        w.set_wvsppos(LTDC.bpcr().read().avbp() + WINDOW_Y1);
-    });
-
-    // Specify the pixel format
-    LTDC.layer(0).pfcr().write(|w| w.set_pf(PIXEL_FORMAT));
-
-    // Configures the default color values as zero
-    LTDC.layer(0).dccr().modify(|w| {
-        w.set_dcblue(BACKCOLOR_BLUE);
-        w.set_dcgreen(BACKCOLOR_GREEN);
-        w.set_dcred(BACKCOLOR_RED);
-        w.set_dcalpha(ALPHA0);
-    });
-
-    // Specifies the constant ALPHA value
-    LTDC.layer(0).cacr().write(|w| w.set_consta(ALPHA));
-
-    // Specifies the blending factors
-    LTDC.layer(0).bfcr().write(|w| {
-        w.set_bf1(Bf1::CONSTANT);
-        w.set_bf2(Bf2::CONSTANT);
-    });
+    const WINDOW_X1: u16 = DISPLAY_WIDTH as _;
+    const IMAGE_WIDTH: u16 = DISPLAY_WIDTH as _;
 
     let (display_buffer_1, display_buffer_2) = unsafe {
         (
@@ -117,43 +65,20 @@ async fn display_task() -> ! {
         .cfbar()
         .write(|w| w.set_cfbadd(display_buffer_1 as *const _ as u32));
 
-    // Configures the color frame buffer pitch in byte
-    LTDC.layer(0).cfblr().write(|w| {
-        w.set_cfbp(IMAGE_WIDTH * PIXEL_SIZE as u16);
-        w.set_cfbll(((WINDOW_X1 - WINDOW_X0) * PIXEL_SIZE as u16) + 3);
-    });
-
-    // Configures the frame buffer line number
-    LTDC.layer(0)
-        .cfblnr()
-        .write(|w| w.set_cfblnbr(IMAGE_HEIGHT));
-
-    // Enable LTDC_Layer by setting LEN bit
-    LTDC.layer(0).cr().modify(|w| w.set_len(true));
-
-    //LTDC->SRCR = LTDC_SRCR_IMR;
-    LTDC.srcr().modify(|w| w.set_imr(Imr::RELOAD));
-
-    // Delay for 1s
-    Timer::after_millis(1000).await;
-
     // Create a display buffer
     let mut display_fb1 = display_target::DisplayBuffer {
         buf: display_buffer_1,
-        width: LCD_X_SIZE as i32,
-        height: LCD_Y_SIZE as i32,
+        width: DISPLAY_WIDTH as i32,
+        height: DISPLAY_HEIGHT as i32,
     };
 
     let mut display_fb2 = display_target::DisplayBuffer {
         buf: display_buffer_2,
-        width: LCD_X_SIZE as i32,
-        height: LCD_Y_SIZE as i32,
+        width: DISPLAY_WIDTH as i32,
+        height: DISPLAY_HEIGHT as i32,
     };
 
     let mut display = &mut display_fb1;
-
-    // Disable the layer
-    LTDC.layer(0).cr().modify(|w| w.set_len(false));
 
     // replace the buffer with the new one
     LTDC.layer(0)
@@ -165,17 +90,6 @@ async fn display_task() -> ! {
         w.set_cfbp(IMAGE_WIDTH * 4_u16);
         w.set_cfbll(((WINDOW_X1 - WINDOW_X0) * 4_u16) + 3);
     });
-
-    // Configures the frame buffer line number
-    LTDC.layer(0)
-        .cfblnr()
-        .write(|w| w.set_cfblnbr(IMAGE_HEIGHT));
-
-    // Use RGB565 pixel format
-    LTDC.layer(0).pfcr().write(|w| w.set_pf(Pf::RGB565));
-
-    // Enable the layer
-    LTDC.layer(0).cr().modify(|w| w.set_len(true));
 
     // Immediately refresh the display
     LTDC.srcr().modify(|w| w.set_imr(Imr::RELOAD));
