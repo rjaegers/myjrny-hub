@@ -17,13 +17,11 @@ use embassy_stm32::{
     peripherals,
 };
 use embassy_time::Timer;
-use embedded_graphics::{
-    geometry::Size,
-    mono_font::{self, ascii},
-    pixelcolor::{Rgb565, RgbColor, WebColors},
+use embedded_graphics::mono_font::ascii;
+use kolibri_embedded_gui::{
+    button::Button, checkbox::Checkbox, label::Label, style::medsize_rgb565_style, ui::Ui,
 };
-use kolibri_embedded_gui::{button::Button, checkbox::Checkbox, label::Label, ui::Ui};
-use mcu::{mt48lc4m32b2, rcc_setup};
+use mcu::{double_buffer::DoubleBuffer, mt48lc4m32b2, rcc_setup};
 use {defmt_rtt as _, panic_probe as _};
 
 bind_interrupts!(struct Irqs {
@@ -32,14 +30,20 @@ bind_interrupts!(struct Irqs {
 
 const DISPLAY_WIDTH: usize = 480;
 const DISPLAY_HEIGHT: usize = 272;
+pub type TargetPixelType = u16;
 
 #[link_section = ".frame_buffer"]
-static mut FB1: [u16; DISPLAY_WIDTH * DISPLAY_HEIGHT] = [0; DISPLAY_WIDTH * DISPLAY_HEIGHT];
+static mut FB1: [TargetPixelType; DISPLAY_WIDTH * DISPLAY_HEIGHT] =
+    [0; DISPLAY_WIDTH * DISPLAY_HEIGHT];
 #[link_section = ".frame_buffer"]
-static mut FB2: [u16; DISPLAY_WIDTH * DISPLAY_HEIGHT] = [0; DISPLAY_WIDTH * DISPLAY_HEIGHT];
+static mut FB2: [TargetPixelType; DISPLAY_WIDTH * DISPLAY_HEIGHT] =
+    [0; DISPLAY_WIDTH * DISPLAY_HEIGHT];
 
 #[embassy_executor::task()]
-async fn display_task() -> ! {
+async fn display_task(
+    mut double_buffer: DoubleBuffer,
+    mut ltdc: Ltdc<'static, peripherals::LTDC>,
+) -> ! {
     use embassy_stm32::pac::LTDC;
 
     info!("Display task started");
@@ -55,11 +59,6 @@ async fn display_task() -> ! {
             &mut *core::ptr::addr_of_mut!(FB2),
         )
     };
-
-    info!(
-        "Display buffers allocated at {:x}, {:x}",
-        display_buffer_1 as *const _, display_buffer_2 as *const _
-    );
 
     LTDC.layer(0)
         .cfbar()
@@ -93,30 +92,6 @@ async fn display_task() -> ! {
 
     // Immediately refresh the display
     LTDC.srcr().modify(|w| w.set_imr(Imr::RELOAD));
-
-    pub fn medsize_rgb565_style() -> kolibri_embedded_gui::style::Style<Rgb565> {
-        kolibri_embedded_gui::style::Style {
-            background_color: Rgb565::new(0x40, 0x80, 0x40), // pretty dark gray
-            item_background_color: Rgb565::new(0x20, 0x40, 0x20), // darker gray
-            highlight_item_background_color: Rgb565::new(0x10, 0x20, 0x10),
-            border_color: Rgb565::WHITE,
-            highlight_border_color: Rgb565::WHITE,
-            primary_color: Rgb565::CSS_DARK_CYAN,
-            secondary_color: Rgb565::YELLOW,
-            icon_color: Rgb565::WHITE,
-            text_color: Rgb565::WHITE,
-            default_widget_height: 16,
-            border_width: 0,
-            highlight_border_width: 1,
-            default_font: mono_font::iso_8859_10::FONT_9X15,
-            spacing: kolibri_embedded_gui::style::Spacing {
-                item_spacing: Size::new(8, 4),
-                button_padding: Size::new(5, 5),
-                default_padding: Size::new(1, 1),
-                window_border_padding: Size::new(3, 3),
-            },
-        }
-    }
 
     let mut i: i32 = 0;
     let mut active_buffer = 0;
@@ -168,7 +143,7 @@ async fn display_task() -> ! {
 }
 
 #[embassy_executor::main]
-async fn main(_spawner: Spawner) {
+async fn main(spawner: Spawner) {
     let p = rcc_setup::stm32f746ng_init();
     info!("Starting...");
 
@@ -229,7 +204,7 @@ async fn main(_spawner: Spawner) {
     // Initialise controller and SDRAM
     let ram_ptr: *mut u32 = sdram.init(&mut delay) as *mut _;
 
-    info!("SDRAM Initialized at {:x}", ram_ptr as usize);
+    info!("SDRAM Initialized at {:x}", ram_ptr as *const _);
 
     // set up the LTDC peripheral to send data to the LCD screen
     // setting timing for AM480272H3TMQW-T01H LCD (MB1046 B-01)
@@ -307,13 +282,23 @@ async fn main(_spawner: Spawner) {
         window_y1: DISPLAY_HEIGHT as _,
     };
 
-    // enable the bottom layer
     ltdc.init_layer(&layer_config, None);
 
-    // Start the display task
-    let spawner = Spawner::for_current_executor().await;
+    let (fb1, fb2) = unsafe {
+        (
+            &mut *core::ptr::addr_of_mut!(FB1),
+            &mut *core::ptr::addr_of_mut!(FB2),
+        )
+    };
 
-    spawner.spawn(display_task()).unwrap();
+    info!(
+        "Display buffers allocated at {:x}, {:x}",
+        fb1 as *const _, fb2 as *const _
+    );
+
+    let double_buffer = DoubleBuffer::new(fb1, fb2, layer_config);
+
+    unwrap!(spawner.spawn(display_task(double_buffer, ltdc)));
 
     let mut led = Output::new(p.PI1, Level::High, Speed::Low);
 
