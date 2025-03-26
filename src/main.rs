@@ -164,23 +164,24 @@ async fn main(spawner: Spawner) {
     let mut touch = ft5336::Ft5336::new(&i2c, 0x38, &mut delay).unwrap();
 
     // set up the LTDC peripheral to send data to the LCD screen
-    // setting timing for AM480272H3TMQW-T01H LCD (MB1046 B-01)
-    const AM480272H3TMQW_HSYNC: u16 = 41; // Horizontal synchronization
-    const AM480272H3TMQW_HBP: u16 = 13; // Horizontal back porch
-    const AM480272H3TMQW_HFP: u16 = 32; // Horizontal front porch
-    const AM480272H3TMQW_VSYNC: u16 = 10; // Vertical synchronization
-    const AM480272H3TMQW_VBP: u16 = 2; // Vertical back porch
-    const AM480272H3TMQW_VFP: u16 = 2; // Vertical front porch
+    // setting timing for RK043FN48H
+    // Details taken from: https://github.com/STMicroelectronics/stm32-rk043fn48h/blob/main/rk043fn48h.h
+    const RK043FN48H_HSYNC: u16 = 41; // Horizontal synchronization
+    const RK043FN48H_HBP: u16 = 13; // Horizontal back porch
+    const RK043FN48H_HFP: u16 = 32; // Horizontal front porch
+    const RK043FN48H_VSYNC: u16 = 10; // Vertical synchronization
+    const RK043FN48H_VBP: u16 = 2; // Vertical back porch
+    const RK043FN48H_VFP: u16 = 2; // Vertical front porch
 
     let ltdc_config = LtdcConfiguration {
         active_width: DISPLAY_WIDTH as _,
         active_height: DISPLAY_HEIGHT as _,
-        h_back_porch: AM480272H3TMQW_HBP,
-        h_front_porch: AM480272H3TMQW_HFP,
-        v_back_porch: AM480272H3TMQW_VBP,
-        v_front_porch: AM480272H3TMQW_VFP,
-        h_sync: AM480272H3TMQW_HSYNC,
-        v_sync: AM480272H3TMQW_VSYNC,
+        h_back_porch: RK043FN48H_HBP,
+        h_front_porch: RK043FN48H_HFP,
+        v_back_porch: RK043FN48H_VBP,
+        v_front_porch: RK043FN48H_VFP,
+        h_sync: RK043FN48H_HSYNC,
+        v_sync: RK043FN48H_VSYNC,
         h_sync_polarity: PolarityActive::ActiveLow,
         v_sync_polarity: PolarityActive::ActiveLow,
         data_enable_polarity: PolarityActive::ActiveLow,
