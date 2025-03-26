@@ -10,10 +10,12 @@ use embassy_stm32::{
     bind_interrupts,
     fmc::Fmc,
     gpio::{Level, Output, Speed},
+    i2c::I2c,
     ltdc::{
         self, Ltdc, LtdcConfiguration, LtdcLayer, LtdcLayerConfig, PolarityActive, PolarityEdge,
     },
     peripherals,
+    time::Hertz,
 };
 use embassy_time::Timer;
 use embedded_graphics::mono_font::ascii;
@@ -158,6 +160,9 @@ async fn main(spawner: Spawner) {
 
     info!("SDRAM Initialized at {:x}", ram_ptr as *const _);
 
+    let mut i2c = I2c::new_blocking(p.I2C3, p.PH7, p.PH8, Hertz(100_000), Default::default());
+    let mut touch = ft5336::Ft5336::new(&i2c, 0x38, &mut delay).unwrap();
+
     // set up the LTDC peripheral to send data to the LCD screen
     // setting timing for AM480272H3TMQW-T01H LCD (MB1046 B-01)
     const AM480272H3TMQW_HSYNC: u16 = 41; // Horizontal synchronization
@@ -255,6 +260,29 @@ async fn main(spawner: Spawner) {
     let mut led = Output::new(p.PI1, Level::High, Speed::Low);
 
     loop {
+        let t = touch.detect_touch(&mut i2c);
+        let mut num: u8 = 0;
+        match t {
+            Err(e) => info!("Error {} from fetching number of touches", e),
+            Ok(n) => {
+                num = n;
+                if num != 0 {
+                    info!("Number of touches: {}", num)
+                };
+            }
+        }
+
+        if num > 0 {
+            let t = touch.get_touch(&mut i2c, 1);
+            match t {
+                Err(_e) => info!("Error fetching touch data"),
+                Ok(n) => info!(
+                    "Touch: {}x{} - weight: {} misc: {}",
+                    n.x, n.y, n.weight, n.misc
+                ),
+            }
+        }
+
         led.set_high();
         Timer::after_millis(1000).await;
 
