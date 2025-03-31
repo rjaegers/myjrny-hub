@@ -9,10 +9,11 @@ use embassy_executor::Spawner;
 use embassy_stm32::{
     bind_interrupts,
     fmc::Fmc,
-    gpio::{Level, Output, Speed},
+    gpio::{AfType, Flex, Level, Output, OutputType, Speed},
     i2c::I2c,
     ltdc::{
-        self, Ltdc, LtdcConfiguration, LtdcLayer, LtdcLayerConfig, PolarityActive, PolarityEdge,
+        self, DePin, Ltdc, LtdcConfiguration, LtdcLayer, LtdcLayerConfig, PolarityActive,
+        PolarityEdge,
     },
     peripherals,
     time::Hertz,
@@ -188,9 +189,11 @@ async fn main(spawner: Spawner) {
         pixel_clock_polarity: PolarityEdge::RisingEdge,
     };
 
-    let mut ltdc_de = Output::new(p.PK7, Level::Low, Speed::High);
-    let mut ltdc_disp_ctrl = Output::new(p.PI12, Level::Low, Speed::High);
-    let mut ltdc_bl_ctrl = Output::new(p.PK3, Level::Low, Speed::High);
+    let ltdc_de_af = p.PK7.af_num();
+    let mut ltdc_de = Flex::new(p.PK7);
+    ltdc_de.set_as_af_unchecked(ltdc_de_af, AfType::output(OutputType::PushPull, Speed::Low));
+    let mut _ltdc_disp_ctrl = Output::new(p.PI12, Level::High, Speed::Low);
+    let mut _ltdc_bl_ctrl = Output::new(p.PK3, Level::High, Speed::Low);
 
     let mut ltdc = Ltdc::new_with_pins(
         p.LTDC, // PERIPHERAL
@@ -227,9 +230,6 @@ async fn main(spawner: Spawner) {
         p.PJ6,  // R7
     );
     ltdc.init(&ltdc_config);
-    ltdc_de.set_low();
-    ltdc_bl_ctrl.set_high();
-    ltdc_disp_ctrl.set_high();
 
     let layer_config = LtdcLayerConfig {
         pixel_format: ltdc::PixelFormat::RGB565,
