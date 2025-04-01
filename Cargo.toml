@@ -38,11 +38,16 @@ embassy-futures = "0.1.1"
 ft5336 = "0.2.0"
 embedded-io-async = "0.6.1"
 embedded-hal = "1.0.0"
+embedded-alloc = "0.5"
 critical-section = "1.1.2"
 stm32-fmc = "0.3.0"
-embedded-graphics = "0.8"
-embedded-layout = "0.4"
-kolibri-embedded-gui = { git = "https://github.com/Yandrik/kolibri", branch = "main" }
+slint-generated = { path = "./slint_generated" }
+slint = { version = "1.10.0", default-features = false, features = [
+    "compat-1-2",
+    "unsafe-single-threaded",
+    "libm",
+    "renderer-software",
+] }
 
 [profile.release]
 debug = 2

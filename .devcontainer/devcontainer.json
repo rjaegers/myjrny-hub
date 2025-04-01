@@ -4,10 +4,12 @@
         "dockerfile": "Dockerfile"
     },
     "privileged": true,
+    "postCreateCommand": "apt-get update && apt-get install libfontconfig1",
     "customizations": {
         "vscode": {
             "extensions": [
-                "probe-rs.probe-rs-debugger@0.24.2"
+                "probe-rs.probe-rs-debugger@0.24.2",
+                "slint.slint@1.10.0"
             ],
             "settings": {
                 "files.insertFinalNewline": true,
@@ -18,7 +20,8 @@
                 "rust-analyzer.checkOnSave.allTargets": false,
                 "rust-analyzer.checkOnSave.extraArgs": [
                     "--bins"
-                ]
+                ],
+                "slint.preview.providedByEditor": true
             }
         }
     }

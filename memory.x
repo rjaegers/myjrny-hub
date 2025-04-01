@@ -12,4 +12,10 @@ SECTIONS
         *(.frame_buffer);
         . = ALIGN(4);
     } > SDRAM
+
+    .heap (NOLOAD) : {
+        . = ALIGN(4);
+        *(.heap);
+        . = ALIGN(4);
+    } > SDRAM
 }

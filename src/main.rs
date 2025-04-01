@@ -1,9 +1,12 @@
 #![no_std]
 #![no_main]
 
-mod display_target;
-mod mcu;
+extern crate alloc;
 
+mod mcu;
+mod slint_backend;
+
+use alloc::{boxed::Box, rc::Rc};
 use defmt::*;
 use embassy_executor::Spawner;
 use embassy_stm32::{
@@ -19,30 +22,34 @@ use embassy_stm32::{
     time::Hertz,
 };
 use embassy_time::Timer;
-use embedded_graphics::mono_font::ascii;
-use kolibri_embedded_gui::{
-    button::Button, checkbox::Checkbox, label::Label, style::medsize_sakura_rgb565_style, ui::Ui,
+
+use mcu::{double_buffer::DoubleBuffer, mt48lc4m32b2, rcc_setup, ALLOCATOR};
+use slint::{
+    platform::software_renderer::{MinimalSoftwareWindow, RepaintBufferType, Rgb565Pixel},
+    ComponentHandle,
 };
-use mcu::{double_buffer::DoubleBuffer, mt48lc4m32b2, rcc_setup};
+use slint_backend::{StmBackend, TargetPixelType, DISPLAY_HEIGHT, DISPLAY_WIDTH};
+use slint_generated::MainWindow;
 use {defmt_rtt as _, panic_probe as _};
 
 bind_interrupts!(struct Irqs {
     LTDC => ltdc::InterruptHandler<peripherals::LTDC>;
 });
 
-const DISPLAY_WIDTH: usize = 480;
-const DISPLAY_HEIGHT: usize = 272;
-pub type TargetPixelType = u16;
+const HEAP_SIZE: usize = 200 * 1024;
 
 #[link_section = ".frame_buffer"]
 static mut FB1: [TargetPixelType; DISPLAY_WIDTH * DISPLAY_HEIGHT] =
-    [0; DISPLAY_WIDTH * DISPLAY_HEIGHT];
+    [Rgb565Pixel(0); DISPLAY_WIDTH * DISPLAY_HEIGHT];
 #[link_section = ".frame_buffer"]
 static mut FB2: [TargetPixelType; DISPLAY_WIDTH * DISPLAY_HEIGHT] =
-    [0; DISPLAY_WIDTH * DISPLAY_HEIGHT];
+    [Rgb565Pixel(0); DISPLAY_WIDTH * DISPLAY_HEIGHT];
+#[link_section = ".heap"]
+static mut HEAP: [u8; HEAP_SIZE] = [0; HEAP_SIZE];
 
 #[embassy_executor::task()]
 async fn display_task(
+    window: Rc<MinimalSoftwareWindow>,
     mut double_buffer: DoubleBuffer,
     mut ltdc: Ltdc<'static, peripherals::LTDC>,
 ) -> ! {
@@ -57,43 +64,21 @@ async fn display_task(
         w.set_cfbll((DISPLAY_WIDTH as u16 * 4_u16) + 3);
     });
 
-    let mut i: u8 = 0;
-
     loop {
-        let mut display = display_target::DisplayBuffer {
-            buf: double_buffer.current(),
-            width: DISPLAY_WIDTH as i32,
-            height: DISPLAY_HEIGHT as i32,
-        };
+        slint::platform::update_timers_and_animations();
 
-        // create UI (needs to be done each frame)
-        let mut ui = Ui::new_fullscreen(&mut display, medsize_sakura_rgb565_style());
+        // blocking render
+        let is_dirty = window.draw_if_needed(|renderer| {
+            let buffer = double_buffer.current();
+            renderer.render(buffer, DISPLAY_WIDTH);
+        });
 
-        // clear UI background (for non-incremental redrawing framebuffered applications)
-        ui.clear_background().ok();
-
-        // === ACTUAL UI CODE STARTS HERE ===
-
-        ui.add(Label::new("Basic Example").with_font(ascii::FONT_10X20));
-
-        ui.add(Label::new("Basic Counter (7LOC)"));
-
-        if ui.add_horizontal(Button::new("-")).clicked() {
-            i = i.saturating_sub(1);
+        if is_dirty {
+            // async transfer of frame buffer to lcd
+            double_buffer.swap(&mut ltdc).await.unwrap();
+        } else {
+            Timer::after_millis(10).await
         }
-        //ui.add_horizontal(Label::new(alloc::format!("Clicked {} times", i).as_ref()));
-        if ui.add_horizontal(Button::new("+")).clicked() {
-            i = i.saturating_add(1);
-        }
-
-        ui.new_row();
-
-        let mut checked = true;
-        ui.add(Checkbox::new(&mut checked));
-
-        double_buffer.swap(&mut ltdc).await.unwrap();
-
-        Timer::after_millis(20).await;
     }
 }
 
@@ -160,6 +145,14 @@ async fn main(spawner: Spawner) {
     let ram_ptr: *mut u32 = sdram.init(&mut delay) as *mut _;
 
     info!("SDRAM Initialized at {:x}", ram_ptr as *const _);
+
+    let heap = unsafe { &mut *core::ptr::addr_of_mut!(HEAP) };
+    let heap_size = core::mem::size_of_val(heap);
+    crate::assert!(heap_size > 0);
+
+    unsafe {
+        ALLOCATOR.init(heap as *const u8 as usize, heap_size);
+    }
 
     let mut i2c = I2c::new_blocking(p.I2C3, p.PH7, p.PH8, Hertz(100_000), Default::default());
     let mut touch = ft5336::Ft5336::new(&i2c, 0x38, &mut delay).unwrap();
@@ -256,7 +249,20 @@ async fn main(spawner: Spawner) {
 
     let double_buffer = DoubleBuffer::new(fb1, fb2, layer_config);
 
-    unwrap!(spawner.spawn(display_task(double_buffer, ltdc)));
+    // create a slint window and register it with slint
+    let window = MinimalSoftwareWindow::new(RepaintBufferType::SwappedBuffers);
+    window.set_size(slint::PhysicalSize::new(
+        DISPLAY_WIDTH as u32,
+        DISPLAY_HEIGHT as u32,
+    ));
+    let backend = Box::new(StmBackend::new(window.clone()));
+    slint::platform::set_platform(backend).expect("backend already initialized");
+    info!("slint gui setup complete");
+
+    unwrap!(spawner.spawn(display_task(window, double_buffer, ltdc)));
+
+    let main_window = MainWindow::new().unwrap();
+    main_window.show().expect("unable to show main window");
 
     let mut led = Output::new(p.PI1, Level::High, Speed::Low);
 
@@ -284,10 +290,10 @@ async fn main(spawner: Spawner) {
             }
         }
 
-        led.set_high();
-        Timer::after_millis(1000).await;
+        //led.set_high();
+        //Timer::after_millis(1000).await;
 
-        led.set_low();
-        Timer::after_millis(1000).await;
+        //led.set_low();
+        //Timer::after_millis(1000).await;
     }
 }

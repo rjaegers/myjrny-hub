@@ -1,4 +1,4 @@
-pub type TargetPixelType = u16;
+use crate::slint_backend::TargetPixelType;
 use embassy_stm32::ltdc::{self, Ltdc, LtdcLayerConfig};
 
 pub struct DoubleBuffer {
