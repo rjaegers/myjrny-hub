@@ -42,6 +42,7 @@ critical-section = "1.1.2"
 stm32-fmc = "0.3.0"
 embedded-graphics = "0.8"
 embedded-layout = "0.4"
+embedded-alloc = { version = "0.6.0", features = ["tlsf"] }
 kolibri-embedded-gui = { git = "https://github.com/Yandrik/kolibri", branch = "main" }
 
 [profile.release]
