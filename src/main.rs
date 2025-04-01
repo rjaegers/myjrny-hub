@@ -117,7 +117,6 @@ async fn display_task(
 
         match (is_touched, was_touched, touch_location) {
             (true, false, loc) => {
-                info!("Touch at {}x{}", loc.x, loc.y);
                 ui.interact(Interaction::Click(loc));
             }
             (true, true, loc) => {
