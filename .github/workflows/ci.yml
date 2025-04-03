@@ -18,7 +18,7 @@ permissions:
 jobs:
   static-checks:
     runs-on: ubuntu-latest
-    container: ghcr.io/philips-software/amp-devcontainer-rust:5.6.2@sha256:55de506d649d9273bee60aa5737987cf1b8005d89fa9ad96b5e1203e89ad512d
+    container: ghcr.io/philips-software/amp-devcontainer-rust:5.7.0@sha256:73248de55e421edf977d4fb7ead82f6855e5395c283405c2beea076bdc0ac204
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
