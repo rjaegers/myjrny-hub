@@ -29,13 +29,15 @@ use embedded_graphics::{
     prelude::{Point, RgbColor, Size, WebColors},
 };
 use kolibri_embedded_gui::{
-    button::Button,
     checkbox::Checkbox,
+    iconbutton::IconButton,
+    icons::size48px,
     label::Label,
     style::{Spacing, Style},
     ui::{Interaction, Ui},
 };
 use mcu::{double_buffer::DoubleBuffer, mt48lc4m32b2, rcc_setup, ALLOCATOR};
+use static_cell::StaticCell;
 use {defmt_rtt as _, panic_probe as _};
 
 bind_interrupts!(struct Irqs {
@@ -55,8 +57,6 @@ static mut FB2: [TargetPixelType; DISPLAY_WIDTH * DISPLAY_HEIGHT] =
     [0; DISPLAY_WIDTH * DISPLAY_HEIGHT];
 #[link_section = ".heap"]
 static mut HEAP: [MaybeUninit<u8>; HEAP_SIZE] = [MaybeUninit::uninit(); HEAP_SIZE];
-
-static mut DELAY: embassy_time::Delay = embassy_time::Delay;
 
 #[embassy_executor::task()]
 async fn display_task(
@@ -138,13 +138,17 @@ async fn display_task(
 
         ui.add(Label::new("Basic Example").with_font(ascii::FONT_10X20));
 
-        ui.add(Label::new("Basic Counter (7LOC)"));
-
-        if ui.add_horizontal(Button::new("-")).clicked() {
+        if ui
+            .add_horizontal(IconButton::new(size48px::actions::Minus))
+            .clicked()
+        {
             i = i.saturating_sub(1);
         }
         ui.add_horizontal(Label::new(alloc::format!("Clicked {} times", i).as_ref()));
-        if ui.add_horizontal(Button::new("+")).clicked() {
+        if ui
+            .add_horizontal(IconButton::new(size48px::actions::Plus))
+            .clicked()
+        {
             i = i.saturating_add(1);
         }
 
@@ -152,6 +156,8 @@ async fn display_task(
 
         let mut checked = true;
         ui.add(Checkbox::new(&mut checked));
+
+        ui.add(IconButton::new(size48px::system::Settings));
 
         double_buffer.swap(&mut ltdc).await.unwrap();
 
@@ -218,13 +224,16 @@ async fn main(spawner: Spawner) {
         mt48lc4m32b2::mt48lc4m32b2_6::Mt48lc4m32b2 {},
     );
 
-    let ram_ptr: *mut u32 = unsafe { sdram.init(&mut DELAY) as *mut _ };
+    static DELAY: StaticCell<embassy_time::Delay> = StaticCell::new();
+    let delay = DELAY.init(embassy_time::Delay);
+
+    let ram_ptr: *mut u32 = sdram.init(delay) as *mut _;
     info!("SDRAM Initialized at {:x}", ram_ptr as *const _);
 
     unsafe { ALLOCATOR.init(&raw mut HEAP as usize, HEAP_SIZE) }
 
     let i2c = I2c::new_blocking(p.I2C3, p.PH7, p.PH8, Hertz(100_000), Default::default());
-    let touch = unsafe { ft5336::Ft5336::new(&i2c, 0x38, &mut DELAY).unwrap() };
+    let touch = ft5336::Ft5336::new(&i2c, 0x38, delay).unwrap();
 
     // set up the LTDC peripheral to send data to the LCD screen
     // setting timing for RK043FN48H
@@ -341,7 +350,7 @@ pub fn handle_touch(
     let t = touch.detect_touch(i2c);
     let mut num: u8 = 0;
     match t {
-        Err(e) => info!("Error {} from fetching number of touches", e),
+        Err(e) => info!("Error {} retrieving number of touches", e),
         Ok(n) => {
             num = n;
             if num != 0 {
@@ -360,9 +369,9 @@ pub fn handle_touch(
                     n.x, n.y, n.weight, n.misc
                 );
 
+                *is_touched = true;
                 point.x = n.y as i32;
                 point.y = n.x as i32;
-                *is_touched = true;
             }
         }
     }
