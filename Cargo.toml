@@ -39,7 +39,7 @@ ft5336 = "0.2.0"
 embedded-io-async = "0.6.1"
 embedded-hal = "1.0.0"
 critical-section = "1.1.2"
-stm32-fmc = "0.3.0"
+stm32-fmc = "0.4.0"
 embedded-graphics = "0.8"
 embedded-layout = "0.4"
 embedded-alloc = { version = "0.6.0", features = ["tlsf"] }
