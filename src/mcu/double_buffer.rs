@@ -31,10 +31,6 @@ impl DoubleBuffer {
         }
     }
 
-    pub fn swap_temp(&mut self) {
-        self.is_buf0 = !self.is_buf0;
-    }
-
     pub async fn swap<T: ltdc::Instance>(
         &mut self,
         ltdc: &mut Ltdc<'_, T>,
@@ -44,15 +40,5 @@ impl DoubleBuffer {
         self.is_buf0 = !self.is_buf0;
         ltdc.set_buffer(self.layer_config.layer, frame_buffer as *const _)
             .await
-    }
-
-    // Clears the buffer
-    pub fn clear(&mut self) {
-        let buf = self.current();
-        let solid_black = TargetPixelType::default();
-
-        for a in buf.iter_mut() {
-            *a = solid_black;
-        }
     }
 }

@@ -44,7 +44,9 @@ embedded-graphics = "0.8"
 embedded-layout = "0.4"
 embedded-alloc = { version = "0.6.0", features = ["tlsf"] }
 kolibri-embedded-gui = { git = "https://github.com/Yandrik/kolibri", branch = "main" }
+static_cell = "2.1.0"
 
 [profile.release]
 debug = 2
 lto = "fat"
+opt-level = "s"

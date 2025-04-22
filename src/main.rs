@@ -7,8 +7,8 @@ mod display_target;
 mod mcu;
 
 use core::mem::MaybeUninit;
-
 use defmt::*;
+use display_target::RotatedDisplayBuffer;
 use embassy_executor::Spawner;
 use embassy_stm32::{
     bind_interrupts,
@@ -29,13 +29,15 @@ use embedded_graphics::{
     prelude::{Point, RgbColor, Size, WebColors},
 };
 use kolibri_embedded_gui::{
-    button::Button,
     checkbox::Checkbox,
+    iconbutton::IconButton,
+    icons::size48px,
     label::Label,
     style::{Spacing, Style},
     ui::{Interaction, Ui},
 };
 use mcu::{double_buffer::DoubleBuffer, mt48lc4m32b2, rcc_setup, ALLOCATOR};
+use static_cell::StaticCell;
 use {defmt_rtt as _, panic_probe as _};
 
 bind_interrupts!(struct Irqs {
@@ -56,8 +58,6 @@ static mut FB2: [TargetPixelType; DISPLAY_WIDTH * DISPLAY_HEIGHT] =
 #[link_section = ".heap"]
 static mut HEAP: [MaybeUninit<u8>; HEAP_SIZE] = [MaybeUninit::uninit(); HEAP_SIZE];
 
-static mut DELAY: embassy_time::Delay = embassy_time::Delay;
-
 #[embassy_executor::task()]
 async fn display_task(
     mut double_buffer: DoubleBuffer,
@@ -77,9 +77,8 @@ async fn display_task(
     });
 
     let mut i: u8 = 0;
-    let mut is_touched = false;
-    let mut was_touched = false;
-    let mut touch_location = Point::new(0, 0);
+    let mut current_touch_location: Option<Point>;
+    let mut previous_touch_location: Option<Point> = None;
 
     pub fn jrny_style() -> Style<Rgb565> {
         Style {
@@ -106,30 +105,36 @@ async fn display_task(
     }
 
     loop {
-        let mut display = display_target::DisplayBuffer {
+        let display = display_target::DisplayBuffer {
             buf: double_buffer.current(),
             width: DISPLAY_WIDTH as i32,
             height: DISPLAY_HEIGHT as i32,
         };
 
-        // create UI (needs to be done each frame)
-        let mut ui = Ui::new_fullscreen(&mut display, jrny_style());
+        let mut rotated_display = RotatedDisplayBuffer {
+            inner: display,
+            rotation: display_target::Rotation::Rotate0,
+        };
 
-        match (is_touched, was_touched, touch_location) {
-            (true, false, loc) => {
-                ui.interact(Interaction::Click(loc));
+        // create UI (needs to be done each frame)
+        let mut ui = Ui::new_fullscreen(&mut rotated_display, jrny_style());
+
+        current_touch_location = handle_touch(&mut touch, &mut i2c);
+
+        match (current_touch_location, previous_touch_location) {
+            (Some(current), None) => {
+                ui.interact(Interaction::Click(current));
             }
-            (true, true, loc) => {
-                ui.interact(Interaction::Drag(loc));
+            (Some(current), Some(_)) => {
+                ui.interact(Interaction::Drag(current));
             }
-            (false, true, loc) => {
-                ui.interact(Interaction::Release(loc));
+            (None, Some(previous)) => {
+                ui.interact(Interaction::Release(previous));
             }
-            (false, false, _) => {
-                //ui.interact(Interaction::Hover(loc));
-            }
+            (None, None) => (),
         }
-        was_touched = is_touched;
+
+        previous_touch_location = current_touch_location;
 
         // clear UI background (for non-incremental redrawing framebuffered applications)
         ui.clear_background().ok();
@@ -138,13 +143,17 @@ async fn display_task(
 
         ui.add(Label::new("Basic Example").with_font(ascii::FONT_10X20));
 
-        ui.add(Label::new("Basic Counter (7LOC)"));
-
-        if ui.add_horizontal(Button::new("-")).clicked() {
+        if ui
+            .add_horizontal(IconButton::new(size48px::actions::Minus))
+            .clicked()
+        {
             i = i.saturating_sub(1);
         }
         ui.add_horizontal(Label::new(alloc::format!("Clicked {} times", i).as_ref()));
-        if ui.add_horizontal(Button::new("+")).clicked() {
+        if ui
+            .add_horizontal(IconButton::new(size48px::actions::Plus))
+            .clicked()
+        {
             i = i.saturating_add(1);
         }
 
@@ -153,9 +162,9 @@ async fn display_task(
         let mut checked = true;
         ui.add(Checkbox::new(&mut checked));
 
-        double_buffer.swap(&mut ltdc).await.unwrap();
+        ui.add(IconButton::new(size48px::system::Settings));
 
-        handle_touch(&mut touch, &mut i2c, &mut touch_location, &mut is_touched);
+        double_buffer.swap(&mut ltdc).await.unwrap();
 
         Timer::after_millis(20).await;
     }
@@ -218,13 +227,16 @@ async fn main(spawner: Spawner) {
         mt48lc4m32b2::mt48lc4m32b2_6::Mt48lc4m32b2 {},
     );
 
-    let ram_ptr: *mut u32 = unsafe { sdram.init(&mut DELAY) as *mut _ };
+    static DELAY: StaticCell<embassy_time::Delay> = StaticCell::new();
+    let delay = DELAY.init(embassy_time::Delay);
+
+    let ram_ptr: *mut u32 = sdram.init(delay) as *mut _;
     info!("SDRAM Initialized at {:x}", ram_ptr as *const _);
 
     unsafe { ALLOCATOR.init(&raw mut HEAP as usize, HEAP_SIZE) }
 
     let i2c = I2c::new_blocking(p.I2C3, p.PH7, p.PH8, Hertz(100_000), Default::default());
-    let touch = unsafe { ft5336::Ft5336::new(&i2c, 0x38, &mut DELAY).unwrap() };
+    let touch = ft5336::Ft5336::new(&i2c, 0x38, delay).unwrap();
 
     // set up the LTDC peripheral to send data to the LCD screen
     // setting timing for RK043FN48H
@@ -334,36 +346,30 @@ async fn main(spawner: Spawner) {
 pub fn handle_touch(
     touch: &mut ft5336::Ft5336<'static, I2c<'static, mode::Blocking>>,
     i2c: &mut I2c<'static, mode::Blocking>,
-    point: &mut Point,
-    is_touched: &mut bool,
-) {
-    *is_touched = false;
-    let t = touch.detect_touch(i2c);
-    let mut num: u8 = 0;
-    match t {
-        Err(e) => info!("Error {} from fetching number of touches", e),
+) -> Option<Point> {
+    match touch.detect_touch(i2c) {
         Ok(n) => {
-            num = n;
-            if num != 0 {
-                info!("Number of touches: {}", num)
-            };
-        }
-    }
-
-    if num > 0 {
-        let t = touch.get_touch(i2c, 1);
-        match t {
-            Err(_e) => info!("Error fetching touch data"),
-            Ok(n) => {
-                info!(
-                    "Touch: {}x{} - weight: {} misc: {}",
-                    n.x, n.y, n.weight, n.misc
-                );
-
-                point.x = n.y as i32;
-                point.y = n.x as i32;
-                *is_touched = true;
+            if n > 0 {
+                match touch.get_touch(i2c, 1) {
+                    Err(e) => {
+                        info!("Error {} retrieving touch data", e);
+                        None
+                    }
+                    Ok(t) => {
+                        info!(
+                            "Touch: {}x{} - weight: {} misc: {}",
+                            t.x, t.y, t.weight, t.misc
+                        );
+                        Some(Point::new(t.y as i32, t.x as i32))
+                    }
+                }
+            } else {
+                None
             }
+        }
+        Err(e) => {
+            info!("Error {} retrieving number of touches", e);
+            None
         }
     }
 }
