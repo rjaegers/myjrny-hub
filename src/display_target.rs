@@ -44,7 +44,6 @@ impl geometry::OriginDimensions for DisplayBuffer<'_> {
     }
 }
 
-#[derive(Copy, Clone)]
 pub enum Rotation {
     Rotate0,
     Rotate90,
@@ -59,7 +58,7 @@ pub struct RotatedDisplayBuffer<'a> {
 
 fn rotate_point(
     point: geometry::Point,
-    rotation: Rotation,
+    rotation: &Rotation,
     width: i32,
     height: i32,
 ) -> geometry::Point {
@@ -82,7 +81,7 @@ impl embedded_graphics::draw_target::DrawTarget for RotatedDisplayBuffer<'_> {
         for pixel in pixels {
             let Pixel(point, color) = pixel;
             let (width, height) = (self.inner.width, self.inner.height);
-            let rotated_point = rotate_point(point, self.rotation, width, height);
+            let rotated_point = rotate_point(point, &self.rotation, width, height);
 
             if rotated_point.x >= 0
                 && rotated_point.y >= 0
