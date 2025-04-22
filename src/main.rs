@@ -12,6 +12,10 @@ use display_target::RotatedDisplayBuffer;
 use embassy_executor::Spawner;
 use embassy_stm32::{
     bind_interrupts,
+    can::{
+        filter::Mask32, Can, Fifo, Rx0InterruptHandler, Rx1InterruptHandler, SceInterruptHandler,
+        TxInterruptHandler,
+    },
     fmc::Fmc,
     gpio::{AfType, Flex, Level, Output, OutputType, Speed},
     i2c::I2c,
@@ -19,7 +23,8 @@ use embassy_stm32::{
         self, DePin, Ltdc, LtdcConfiguration, LtdcLayer, LtdcLayerConfig, PolarityActive,
         PolarityEdge,
     },
-    mode, peripherals,
+    mode,
+    peripherals::{self, CAN1},
     time::Hertz,
 };
 use embassy_time::Timer;
@@ -27,6 +32,11 @@ use embedded_graphics::{
     mono_font::{self, ascii},
     pixelcolor::Rgb565,
     prelude::{Point, RgbColor, Size, WebColors},
+};
+use j1939::{
+    self,
+    frame::{Request, PGN_ADDRESSCLAIM},
+    stack,
 };
 use kolibri_embedded_gui::{
     checkbox::Checkbox,
@@ -42,6 +52,10 @@ use {defmt_rtt as _, panic_probe as _};
 
 bind_interrupts!(struct Irqs {
     LTDC => ltdc::InterruptHandler<peripherals::LTDC>;
+    CAN1_RX0 => Rx0InterruptHandler<CAN1>;
+    CAN1_RX1 => Rx1InterruptHandler<CAN1>;
+    CAN1_SCE => SceInterruptHandler<CAN1>;
+    CAN1_TX => TxInterruptHandler<CAN1>;
 });
 
 const HEAP_SIZE: usize = 8 * 1024;
@@ -57,6 +71,82 @@ static mut FB2: [TargetPixelType; DISPLAY_WIDTH * DISPLAY_HEIGHT] =
     [0; DISPLAY_WIDTH * DISPLAY_HEIGHT];
 #[link_section = ".heap"]
 static mut HEAP: [MaybeUninit<u8>; HEAP_SIZE] = [MaybeUninit::uninit(); HEAP_SIZE];
+
+/// TimeDriver implementation for embassy builds
+#[derive(Clone)]
+pub struct EmbassyTimerDriver;
+
+impl EmbassyTimerDriver {
+    /// Creates a new EmbassyTimerDriver
+    pub fn new() -> Self {
+        Default::default()
+    }
+}
+
+impl Default for EmbassyTimerDriver {
+    fn default() -> Self {
+        Self
+    }
+}
+
+impl j1939::time::TimerDriver for EmbassyTimerDriver {
+    fn now(&self) -> j1939::time::Instant {
+        let duration = embassy_time::Instant::now().as_millis();
+        j1939::time::Instant::from_ticks(duration)
+    }
+}
+
+/// A wrapper around the embassy CAN driver to implement the `embedded_can::blocking::Can` trait.
+pub struct BlockingCanWrapper<'d> {
+    can: &'d mut Can<'d>,
+}
+
+impl<'d> BlockingCanWrapper<'d> {
+    /// Creates a new BlockingCanWrapper instance.
+    pub fn new(can: &'d mut Can<'d>) -> Self {
+        Self { can }
+    }
+}
+
+// TODO: better error mapping
+impl embedded_can::blocking::Can for BlockingCanWrapper<'_> {
+    type Frame = embassy_stm32::can::Frame;
+    type Error = embedded_can::ErrorKind;
+
+    fn transmit(&mut self, frame: &Self::Frame) -> Result<(), Self::Error> {
+        // Use the `try_write` method to send a frame.
+        self.can
+            .try_write(frame)
+            .map_err(|_| embedded_can::ErrorKind::Other)?;
+        Ok(())
+    }
+
+    fn receive(&mut self) -> Result<Self::Frame, Self::Error> {
+        // Use the `try_read` method to receive a frame.
+        self.can
+            .try_read()
+            .map(|envelope| envelope.frame)
+            .map_err(|e| match e {
+                embassy_stm32::can::enums::TryReadError::Empty => embedded_can::ErrorKind::Other,
+                embassy_stm32::can::enums::TryReadError::BusError(_) => {
+                    embedded_can::ErrorKind::Other
+                }
+            })
+    }
+}
+
+#[embassy_executor::task()]
+async fn can_task(mut stack: stack::Stack<BlockingCanWrapper<'static>, EmbassyTimerDriver>) -> ! {
+    loop {
+        stack.process();
+
+        // // Send a Address Request to update the address list
+        // let req = Request::new(PGN_ADDRESSCLAIM, 0xFE, 0xFF);
+        // stack.send_frame(req.into());
+
+        Timer::after_millis(10).await;
+    }
+}
 
 #[embassy_executor::task()]
 async fn display_task(
@@ -331,6 +421,17 @@ async fn main(spawner: Spawner) {
     let double_buffer = DoubleBuffer::new(fb1, fb2, layer_config);
 
     unwrap!(spawner.spawn(display_task(double_buffer, ltdc, i2c, touch)));
+
+    static CAN: StaticCell<Can<'static>> = StaticCell::new();
+    let can = CAN.init(Can::new(p.CAN1, p.PB8, p.PB9, Irqs));
+    can.modify_filters()
+        .enable_bank(0, Fifo::Fifo0, Mask32::accept_all());
+    can.enable().await;
+
+    let blocking_can = BlockingCanWrapper::new(can);
+    let stack = j1939::stack::Stack::new(blocking_can, EmbassyTimerDriver::new());
+
+    unwrap!(spawner.spawn(can_task(stack)));
 
     let mut led = Output::new(p.PI1, Level::High, Speed::Low);
 
