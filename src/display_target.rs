@@ -44,6 +44,7 @@ impl geometry::OriginDimensions for DisplayBuffer<'_> {
     }
 }
 
+#[allow(unused)]
 pub enum Rotation {
     Rotate0,
     Rotate90,
